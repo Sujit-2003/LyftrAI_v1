@@ -10,9 +10,14 @@ import tempfile
 import pytest
 from fastapi.testclient import TestClient
 
-# Set test environment variables before importing app
-os.environ["WEBHOOK_SECRET"] = "testsecret"
-os.environ["LOG_LEVEL"] = "DEBUG"
+
+def compute_signature(secret: str, body: bytes) -> str:
+    """Compute HMAC-SHA256 signature for request body."""
+    return hmac.new(
+        secret.encode("utf-8"),
+        body,
+        hashlib.sha256,
+    ).hexdigest()
 
 
 @pytest.fixture(scope="function")
@@ -29,39 +34,50 @@ def test_db_path():
 @pytest.fixture(scope="function")
 def client(test_db_path):
     """Create a test client with isolated database."""
+    # Set environment variables BEFORE importing any app modules
+    os.environ["WEBHOOK_SECRET"] = "testsecret"
+    os.environ["LOG_LEVEL"] = "DEBUG"
     os.environ["DATABASE_URL"] = f"sqlite:///{test_db_path}"
 
-    # Import after setting environment
+    # Clear any cached modules to ensure fresh state
+    import sys
+    modules_to_remove = [key for key in sys.modules.keys() if key.startswith('app.')]
+    for mod in modules_to_remove:
+        del sys.modules[mod]
+
+    # Now import fresh modules
+    from app.config import get_settings
     from app.main import app
-    from app.storage import init_database, _db
+    from app.storage import get_database, init_database
+    from app.metrics import get_metrics
     import app.storage as storage_module
+    import app.metrics as metrics_module
+    import app.config as config_module
 
-    # Reset the global database instance
+    # Clear the LRU cache for settings
+    get_settings.cache_clear()
+
+    # Reset global instances
     storage_module._db = None
+    metrics_module._metrics = None
 
-    # Initialize fresh database
-    init_database()
+    # Create a fresh database instance with the new path
+    db = get_database()
+    db.init_schema()
 
     with TestClient(app) as c:
         yield c
 
-    # Cleanup
+    # Cleanup global state
     storage_module._db = None
+    metrics_module._metrics = None
+    get_settings.cache_clear()
 
 
 @pytest.fixture
 def webhook_secret():
     """Return the test webhook secret."""
     return "testsecret"
-
-
-def compute_signature(secret: str, body: bytes) -> str:
-    """Compute HMAC-SHA256 signature for request body."""
-    return hmac.new(
-        secret.encode("utf-8"),
-        body,
-        hashlib.sha256,
-    ).hexdigest()
 
 
 @pytest.fixture
