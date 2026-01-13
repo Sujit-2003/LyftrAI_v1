@@ -62,24 +62,10 @@ class MetricsCollector:
             lines.append("# HELP request_latency_ms_bucket Request latency histogram in milliseconds")
             lines.append("# TYPE request_latency_ms_bucket histogram")
 
-            cumulative = 0
+            # _latency_counts already contains cumulative values from observe_latency
             for bucket in self._latency_buckets:
-                cumulative += self._latency_counts[bucket] - (
-                    cumulative if bucket == float("inf") else 0
-                )
-                # Recalculate cumulative properly
-                pass
-
-            # Calculate cumulative counts for histogram
-            cumulative = 0
-            for bucket in self._latency_buckets:
-                cumulative = sum(
-                    self._latency_counts[b]
-                    for b in self._latency_buckets
-                    if b <= bucket
-                )
                 le = "+Inf" if bucket == float("inf") else str(int(bucket))
-                lines.append(f'request_latency_ms_bucket{{le="{le}"}} {cumulative}')
+                lines.append(f'request_latency_ms_bucket{{le="{le}"}} {self._latency_counts[bucket]}')
 
             lines.append(f"request_latency_ms_sum {self._latency_sum:.2f}")
             lines.append(f"request_latency_ms_count {self._latency_count}")
